@@ -38,7 +38,7 @@ type socket struct {
 	log   *log.Logger
 
 	mu    sync.RWMutex
-	conns []*Conn          // ZMTP connections
+	conns []*Conn // ZMTP connections
 	r     rpool
 	w     wpool
 
@@ -48,6 +48,8 @@ type socket struct {
 	cancel   context.CancelFunc
 	listener net.Listener
 	dialer   net.Dialer
+
+	listenFunction func(string, string) (net.Listener, error)
 
 	closedConns chan *Conn
 	quit        chan struct{}
@@ -59,18 +61,19 @@ func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &socket{
-		typ:         sockType,
-		retry:       defaultRetry,
-		sec:         nullSecurity{},
-		conns:       nil,
-		r:           newQReader(ctx),
-		w:           newMWriter(ctx),
-		props:       make(map[string]interface{}),
-		ctx:         ctx,
-		cancel:      cancel,
-		dialer:      net.Dialer{Timeout: defaultTimeout},
-		closedConns: make(chan *Conn),
-		quit:        make(chan struct{}),
+		typ:            sockType,
+		retry:          defaultRetry,
+		sec:            nullSecurity{},
+		conns:          nil,
+		r:              newQReader(ctx),
+		w:              newMWriter(ctx),
+		props:          make(map[string]interface{}),
+		ctx:            ctx,
+		cancel:         cancel,
+		dialer:         net.Dialer{Timeout: defaultTimeout},
+		listenFunction: net.Listen,
+		closedConns:    make(chan *Conn),
+		quit:           make(chan struct{}),
 	}
 }
 
@@ -156,11 +159,11 @@ func (sck *socket) Listen(endpoint string) error {
 
 	switch network {
 	case "ipc":
-		l, err = net.Listen("unix", addr)
+		l, err = sck.listenFunction("unix", addr)
 	case "tcp":
-		l, err = net.Listen("tcp", addr)
+		l, err = sck.listenFunction("tcp", addr)
 	case "udp":
-		l, err = net.Listen("udp", addr)
+		l, err = sck.listenFunction("udp", addr)
 	case "inproc":
 		l, err = inproc.Listen(addr)
 	default:

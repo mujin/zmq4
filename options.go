@@ -6,6 +6,7 @@ package zmq4
 
 import (
 	"log"
+	"net"
 	"time"
 )
 
@@ -48,6 +49,12 @@ func WithDialerTimeout(timeout time.Duration) Option {
 func WithLogger(msg *log.Logger) Option {
 	return func(s *socket) {
 		s.log = msg
+	}
+}
+
+func WithListenFunction(listenFunction func(string, string) (net.Listener, error)) Option {
+	return func(s *socket) {
+		s.listenFunction = listenFunction
 	}
 }
 
