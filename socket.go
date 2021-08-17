@@ -246,7 +246,13 @@ connect:
 		return xerrors.Errorf("zmq4: got a nil dial-conn to %q", endpoint)
 	}
 
-	zconn, err := Open(conn, sck.sec, sck.typ, sck.id, false, sck.scheduleRmConn)
+	var reaperRunning bool
+	zconn, err := Open(conn, sck.sec, sck.typ, sck.id, false, func (c *Conn) {
+		// if go sck.connReaper() hasn't be called yet, scheduleRmConn will deadlock
+		if reaperRunning {
+			sck.scheduleRmConn(c)
+		}
+	})
 	if err != nil {
 		return xerrors.Errorf("zmq4: could not open a ZMTP connection: %w", err)
 	}
@@ -255,6 +261,7 @@ connect:
 	}
 
 	go sck.connReaper()
+	reaperRunning = true
 	sck.addConn(zconn)
 	return nil
 }
