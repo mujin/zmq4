@@ -6,15 +6,15 @@ package zmq4
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/go-zeromq/zmq4/internal/inproc"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -23,9 +23,9 @@ const (
 )
 
 var (
-	errInvalidAddress = xerrors.New("zmq4: invalid address")
+	errInvalidAddress = errors.New("zmq4: invalid address")
 
-	ErrBadProperty = xerrors.New("zmq4: bad property")
+	ErrBadProperty = errors.New("zmq4: bad property")
 )
 
 // socket implements the ZeroMQ socket interface
@@ -49,10 +49,10 @@ type socket struct {
 	listener net.Listener
 	dialer   net.Dialer
 
-	listenFunction func(string, string) (net.Listener, error)
+	closedConns []*Conn
+	reaperCond  *sync.Cond
 
-	closedConns chan *Conn
-	quit        chan struct{}
+	listenFunction func(string, string) (net.Listener, error)
 }
 
 func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
@@ -61,19 +61,17 @@ func newDefaultSocket(ctx context.Context, sockType SocketType) *socket {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &socket{
-		typ:            sockType,
-		retry:          defaultRetry,
-		sec:            nullSecurity{},
-		conns:          nil,
-		r:              newQReader(ctx),
-		w:              newMWriter(ctx),
-		props:          make(map[string]interface{}),
-		ctx:            ctx,
-		cancel:         cancel,
-		dialer:         net.Dialer{Timeout: defaultTimeout},
-		listenFunction: net.Listen,
-		closedConns:    make(chan *Conn),
-		quit:           make(chan struct{}),
+		typ:        sockType,
+		retry:      defaultRetry,
+		sec:        nullSecurity{},
+		conns:      nil,
+		r:          newQReader(ctx),
+		w:          newMWriter(ctx),
+		props:      make(map[string]interface{}),
+		ctx:        ctx,
+		cancel:     cancel,
+		dialer:     net.Dialer{Timeout: defaultTimeout},
+		reaperCond: sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -92,10 +90,32 @@ func newSocket(ctx context.Context, sockType SocketType, opts ...Option) *socket
 	return sck
 }
 
+func (sck *socket) topics() []string {
+	var (
+		keys   = make(map[string]struct{})
+		topics []string
+	)
+	sck.mu.RLock()
+	for _, con := range sck.conns {
+		con.mu.RLock()
+		for topic := range con.topics {
+			if _, dup := keys[topic]; dup {
+				continue
+			}
+			keys[topic] = struct{}{}
+			topics = append(topics, topic)
+		}
+		con.mu.RUnlock()
+	}
+	sck.mu.RUnlock()
+	sort.Strings(topics)
+	return topics
+}
+
 // Close closes the open Socket
 func (sck *socket) Close() error {
 	sck.cancel()
-	close(sck.quit)
+	sck.reaperCond.Signal()
 
 	if sck.listener != nil {
 		defer sck.listener.Close()
@@ -157,21 +177,16 @@ func (sck *socket) Listen(endpoint string) error {
 
 	var l net.Listener
 
-	switch network {
-	case "ipc":
-		l, err = sck.listenFunction("unix", addr)
-	case "tcp":
-		l, err = sck.listenFunction("tcp", addr)
-	case "udp":
-		l, err = sck.listenFunction("udp", addr)
-	case "inproc":
-		l, err = inproc.Listen(addr)
+	trans, ok := drivers.get(network)
+	switch {
+	case ok:
+		l, err = trans.Listen(sck.ctx, addr, sck.listenFunction)
 	default:
 		panic("zmq4: unknown protocol " + network)
 	}
 
 	if err != nil {
-		return xerrors.Errorf("zmq4: could not listen to %q: %w", endpoint, err)
+		return fmt.Errorf("zmq4: could not listen to %q: %w", endpoint, err)
 	}
 	sck.listener = l
 
@@ -217,18 +232,15 @@ func (sck *socket) Dial(endpoint string) error {
 		return err
 	}
 
-	retries := 0
-	var conn net.Conn
+	var (
+		conn      net.Conn
+		trans, ok = drivers.get(network)
+		retries   = 0
+	)
 connect:
-	switch network {
-	case "ipc":
-		conn, err = sck.dialer.DialContext(sck.ctx, "unix", addr)
-	case "tcp":
-		conn, err = sck.dialer.DialContext(sck.ctx, "tcp", addr)
-	case "udp":
-		conn, err = sck.dialer.DialContext(sck.ctx, "udp", addr)
-	case "inproc":
-		conn, err = inproc.Dial(addr)
+	switch {
+	case ok:
+		conn, err = trans.Dial(sck.ctx, &sck.dialer, addr)
 	default:
 		panic("zmq4: unknown protocol " + network)
 	}
@@ -239,11 +251,11 @@ connect:
 			time.Sleep(sck.retry)
 			goto connect
 		}
-		return xerrors.Errorf("zmq4: could not dial to %q: %w", endpoint, err)
+		return fmt.Errorf("zmq4: could not dial to %q (retry=%v): %w", endpoint, sck.retry, err)
 	}
 
 	if conn == nil {
-		return xerrors.Errorf("zmq4: got a nil dial-conn to %q", endpoint)
+		return fmt.Errorf("zmq4: got a nil dial-conn to %q", endpoint)
 	}
 
 	var reaperRunning bool
@@ -254,10 +266,10 @@ connect:
 		}
 	})
 	if err != nil {
-		return xerrors.Errorf("zmq4: could not open a ZMTP connection: %w", err)
+		return fmt.Errorf("zmq4: could not open a ZMTP connection: %w", err)
 	}
 	if zconn == nil {
-		return xerrors.Errorf("zmq4: got a nil ZMTP connection to %q", endpoint)
+		return fmt.Errorf("zmq4: got a nil ZMTP connection to %q", endpoint)
 	}
 
 	go sck.connReaper()
@@ -311,10 +323,10 @@ func (sck *socket) rmConn(c *Conn) {
 }
 
 func (sck *socket) scheduleRmConn(c *Conn) {
-	select {
-	case sck.closedConns <- c:
-	case <-sck.quit:
-	}
+	sck.reaperCond.L.Lock()
+	sck.closedConns = append(sck.closedConns, c)
+	sck.reaperCond.Signal()
+	sck.reaperCond.L.Unlock()
 }
 
 // Type returns the type of this Socket (PUB, SUB, ...)
@@ -353,13 +365,22 @@ func (sck *socket) timeout() time.Duration {
 }
 
 func (sck *socket) connReaper() {
+	sck.reaperCond.L.Lock()
+	defer sck.reaperCond.L.Unlock()
+
 	for {
-		select {
-		case conn := <-sck.closedConns:
-			sck.rmConn(conn)
-		case <-sck.quit:
+		for len(sck.closedConns) == 0 && sck.ctx.Err() == nil {
+			sck.reaperCond.Wait()
+		}
+
+		if sck.ctx.Err() != nil {
 			return
 		}
+
+		for _, c := range sck.closedConns {
+			sck.rmConn(c)
+		}
+		sck.closedConns = nil
 	}
 }
 

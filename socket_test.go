@@ -6,6 +6,7 @@ package zmq4_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -13,11 +14,10 @@ import (
 
 	"github.com/go-zeromq/zmq4"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/xerrors"
 )
 
 func TestInvalidConn(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 
 	ep := must(EndPoint("tcp"))
 	cleanUp(ep)
@@ -37,17 +37,17 @@ func TestInvalidConn(t *testing.T) {
 	grp.Go(func() error {
 		conn, err := net.Dial("tcp", ep[len("tcp://"):])
 		if err != nil {
-			return xerrors.Errorf("could not dial %q: %w", ep, err)
+			return fmt.Errorf("could not dial %q: %w", ep, err)
 		}
 		defer conn.Close()
 		var reply = make([]byte, 64)
 		_, err = io.ReadFull(conn, reply)
 		if err != nil {
-			return xerrors.Errorf("could not read reply bytes...: %w", err)
+			return fmt.Errorf("could not read reply bytes...: %w", err)
 		}
 		_, err = conn.Write(make([]byte, 64))
 		if err != nil {
-			return xerrors.Errorf("could not send bytes...: %w", err)
+			return fmt.Errorf("could not send bytes...: %w", err)
 		}
 		time.Sleep(1 * time.Second) // FIXME(sbinet): hugly.
 		return nil
@@ -63,7 +63,7 @@ func TestInvalidConn(t *testing.T) {
 }
 
 func TestConnPairs(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 
 	bkg := context.Background()
 
@@ -160,7 +160,7 @@ func TestConnPairs(t *testing.T) {
 			if err == nil {
 				t.Fatalf("dialed %q", ep)
 			}
-			want := xerrors.Errorf("zmq4: could not open a ZMTP connection: zmq4: could not initialize ZMTP connection: zmq4: peer=%q not compatible with %q", tc.srv.Type(), tc.wrong.Type())
+			want := fmt.Errorf("zmq4: could not open a ZMTP connection: zmq4: could not initialize ZMTP connection: zmq4: peer=%q not compatible with %q", tc.srv.Type(), tc.wrong.Type())
 			if got, want := err.Error(), want.Error(); got != want {
 				t.Fatalf("invalid error:\ngot = %v\nwant= %v", got, want)
 			}
@@ -170,5 +170,53 @@ func TestConnPairs(t *testing.T) {
 				t.Fatalf("could not dial %q: %+v", ep, err)
 			}
 		})
+	}
+}
+
+func TestConnReaperDeadlock(t *testing.T) {
+	// Should avoid deadlock when multiple clients are closed rapidly.
+
+	ep := must(EndPoint("tcp"))
+	defer cleanUp(ep)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Bind the server.
+	srv := zmq4.NewRouter(ctx, zmq4.WithLogger(zmq4.Devnull))
+	if err := srv.Listen(ep); err != nil {
+		t.Fatalf("could not listen on %q: %+v", ep, err)
+	}
+	defer srv.Close()
+
+	// Connect 10 clients.
+	var clients []zmq4.Socket
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprint("client-", i)
+		c := zmq4.NewReq(ctx, zmq4.WithLogger(zmq4.Devnull), zmq4.WithID(zmq4.SocketIdentity(id)))
+		if err := c.Dial(ep); err != nil {
+			t.Fatalf("could not dial %q: %+v", ep, err)
+		}
+		clients = append(clients, c)
+	}
+
+	// Disconnect 5 of them _from the client side_. The server does not know
+	// the client is gone until it tries to send a message below.
+	for i := 0; i < 5; i++ {
+		clients[i].Close()
+	}
+
+	// Now try to send a message from the server to all 10 clients.
+	msg := zmq4.NewMsgFrom(nil, nil, []byte("payload"))
+	for i := range clients {
+		id := fmt.Sprint("client-", i)
+		msg.Frames[0] = []byte(id)
+		if err := srv.Send(msg); err != nil {
+			t.Logf("Send to %s failed: %+v\n", id, err)
+		}
+	}
+
+	for i := 5; i < 10; i++ {
+		clients[i].Close()
 	}
 }

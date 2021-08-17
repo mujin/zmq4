@@ -10,25 +10,25 @@
 package inproc
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
-
-	"golang.org/x/xerrors"
 )
 
 var (
-	mgr = context{db: make(map[string]*Listener)}
+	mgr = contextType{db: make(map[string]*Listener)}
 
-	ErrClosed      = xerrors.New("inproc: connection closed")
-	ErrConnRefused = xerrors.New("inproc: connection refused")
+	ErrClosed      = errors.New("inproc: connection closed")
+	ErrConnRefused = errors.New("inproc: connection refused")
 )
 
 func init() {
 	mgr.cv.L = &mgr.mu
 }
 
-type context struct {
+type contextType struct {
 	mu sync.Mutex
 	cv sync.Cond
 	db map[string]*Listener
@@ -96,7 +96,7 @@ func Listen(addr string) (*Listener, error) {
 	_, dup := mgr.db[addr]
 	if dup {
 		mgr.mu.Unlock()
-		return nil, xerrors.Errorf("inproc: address %q already in use", addr)
+		return nil, fmt.Errorf("inproc: address %q already in use", addr)
 	}
 
 	l := &Listener{
@@ -171,7 +171,6 @@ func Dial(addr string) (net.Conn, error) {
 		}
 		mgr.cv.Wait()
 	}
-	panic("unreachable")
 }
 
 // Addr represents an in-process "network" end-point address.
@@ -179,11 +178,7 @@ type Addr string
 
 // String implements net.Addr.String
 func (a Addr) String() string {
-	s := string(a)
-	if strings.HasPrefix(s, "inproc://") {
-		s = s[len("inproc://"):]
-	}
-	return s
+	return strings.TrimPrefix(string(a), "inproc://")
 }
 
 // Network returns the name of the network.
