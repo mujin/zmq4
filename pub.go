@@ -186,7 +186,7 @@ func (q *pubQReader) listen(ctx context.Context, r *Conn) {
 	defer r.Close()
 
 	for {
-		msg := r.read()
+		msg := r.read(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -250,7 +250,7 @@ func (w *pubMWriter) run() {
 		msg, _ := w.q.Peek()
 		w.q.Pop()
 		w.qmu.Unlock()
-		w.sendMsg(msg)
+		w.sendMsg(w.ctx, msg)
 	}
 }
 
@@ -308,7 +308,7 @@ func (w *pubMWriter) write(ctx context.Context, msg Msg) error {
 	return nil
 }
 
-func (w *pubMWriter) sendMsg(msg Msg) {
+func (w *pubMWriter) sendMsg(ctx context.Context, msg Msg) {
 	topic := string(msg.Frames[0])
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -316,7 +316,7 @@ func (w *pubMWriter) sendMsg(msg Msg) {
 	for i := range w.ws {
 		ww := w.ws[i]
 		if ww.subscribed(topic) {
-			_ = ww.SendMsg(msg)
+			_ = ww.SendMsg(ctx, msg)
 		}
 	}
 }

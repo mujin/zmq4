@@ -6,6 +6,7 @@
 package null
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -31,18 +32,18 @@ func (security) Type() zmq4.SecurityType {
 //  https://rfc.zeromq.org/spec:23/ZMTP/
 //  https://rfc.zeromq.org/spec:24/ZMTP-PLAIN/
 //  https://rfc.zeromq.org/spec:25/ZMTP-CURVE/
-func (security) Handshake(conn *zmq4.Conn, server bool) error {
+func (security) Handshake(ctx context.Context, conn *zmq4.Conn, server bool) error {
 	raw, err := conn.Meta.MarshalZMTP()
 	if err != nil {
 		return fmt.Errorf("security/null: could not marshal metadata: %w", err)
 	}
 
-	err = conn.SendCmd(zmq4.CmdReady, raw)
+	err = conn.SendCmd(ctx, zmq4.CmdReady, raw)
 	if err != nil {
 		return fmt.Errorf("security/null: could not send metadata to peer: %w", err)
 	}
 
-	cmd, err := conn.RecvCmd()
+	cmd, err := conn.RecvCmd(ctx)
 	if err != nil {
 		return fmt.Errorf("security/null: could not recv metadata from peer: %w", err)
 	}

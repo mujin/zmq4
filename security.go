@@ -5,6 +5,7 @@
 package zmq4
 
 import (
+	"context"
 	"fmt"
 	"io"
 )
@@ -20,7 +21,7 @@ type Security interface {
 	//  https://rfc.zeromq.org/spec:23/ZMTP/
 	//  https://rfc.zeromq.org/spec:24/ZMTP-PLAIN/
 	//  https://rfc.zeromq.org/spec:25/ZMTP-CURVE/
-	Handshake(conn *Conn, server bool) error
+	Handshake(ctx context.Context, conn *Conn, server bool) error
 
 	// Encrypt writes the encrypted form of data to w.
 	Encrypt(w io.Writer, data []byte) (int, error)
@@ -61,18 +62,18 @@ func (nullSecurity) Type() SecurityType {
 //  https://rfc.zeromq.org/spec:23/ZMTP/
 //  https://rfc.zeromq.org/spec:24/ZMTP-PLAIN/
 //  https://rfc.zeromq.org/spec:25/ZMTP-CURVE/
-func (nullSecurity) Handshake(conn *Conn, server bool) error {
+func (nullSecurity) Handshake(ctx context.Context, conn *Conn, server bool) error {
 	raw, err := conn.Meta.MarshalZMTP()
 	if err != nil {
 		return fmt.Errorf("zmq4: could not marshal metadata: %w", err)
 	}
 
-	err = conn.SendCmd(CmdReady, raw)
+	err = conn.SendCmd(ctx, CmdReady, raw)
 	if err != nil {
 		return fmt.Errorf("zmq4: could not send metadata to peer: %w", err)
 	}
 
-	cmd, err := conn.RecvCmd()
+	cmd, err := conn.RecvCmd(ctx)
 	if err != nil {
 		return fmt.Errorf("zmq4: could not recv metadata from peer: %w", err)
 	}

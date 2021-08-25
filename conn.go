@@ -6,6 +6,7 @@ package zmq4
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var ErrClosedConn = errors.New("zmq4: read/write on closed connection")
@@ -43,28 +45,10 @@ func (c *Conn) Close() error {
 	return c.rw.Close()
 }
 
-func (c *Conn) Read(p []byte) (int, error) {
-	if c.Closed() {
-		return 0, ErrClosedConn
-	}
-	n, err := io.ReadFull(c.rw, p)
-	c.checkIO(err)
-	return n, err
-}
-
-func (c *Conn) Write(p []byte) (int, error) {
-	if c.Closed() {
-		return 0, ErrClosedConn
-	}
-	n, err := c.rw.Write(p)
-	c.checkIO(err)
-	return n, err
-}
-
 // Open opens a ZMTP connection over rw with the given security, socket type and identity.
 // An optional onCloseErrorCB can be provided to inform the caller when this Conn is closed.
 // Open performs a complete ZMTP handshake.
-func Open(rw net.Conn, sec Security, sockType SocketType, sockID SocketIdentity, server bool, onCloseErrorCB func(c *Conn)) (*Conn, error) {
+func Open(ctx context.Context, rw net.Conn, sec Security, sockType SocketType, sockID SocketIdentity, server bool, onCloseErrorCB func(c *Conn)) (*Conn, error) {
 	if rw == nil {
 		return nil, fmt.Errorf("zmq4: invalid nil read-writer")
 	}
@@ -87,7 +71,7 @@ func Open(rw net.Conn, sec Security, sockType SocketType, sockID SocketIdentity,
 	conn.Meta[sysSockID] = conn.id.String()
 	conn.Peer.Meta = make(Metadata)
 
-	err := conn.init(sec)
+	err := conn.init(ctx, sec)
 	if err != nil {
 		return nil, fmt.Errorf("zmq4: could not initialize ZMTP connection: %w", err)
 	}
@@ -96,15 +80,15 @@ func Open(rw net.Conn, sec Security, sockType SocketType, sockID SocketIdentity,
 }
 
 // init performs a ZMTP handshake over an io.ReadWriter
-func (conn *Conn) init(sec Security) error {
+func (conn *Conn) init(ctx context.Context, sec Security) error {
 	var err error
 
-	err = conn.greet(conn.Server)
+	err = conn.greet(ctx, conn.Server)
 	if err != nil {
 		return fmt.Errorf("zmq4: could not exchange greetings: %w", err)
 	}
 
-	err = conn.sec.Handshake(conn, conn.Server)
+	err = conn.sec.Handshake(ctx, conn, conn.Server)
 	if err != nil {
 		return fmt.Errorf("zmq4: could not perform security handshake: %w", err)
 	}
@@ -122,7 +106,7 @@ func (conn *Conn) init(sec Security) error {
 	return nil
 }
 
-func (conn *Conn) greet(server bool) error {
+func (conn *Conn) greet(ctx context.Context, server bool) error {
 	var err error
 	send := greeting{Version: defaultVersion}
 	send.Sig.Header = sigHeader
@@ -132,6 +116,29 @@ func (conn *Conn) greet(server bool) error {
 		return errSecMech
 	}
 	copy(send.Mechanism[:], kind)
+
+	// set up cancellation
+	var waitGroup sync.WaitGroup
+	defer waitGroup.Wait()
+	done := make(chan struct{})
+	defer close(done)
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		select {
+		case <-ctx.Done():
+			conn.rw.Close()
+		case <-done:
+		}
+	}()
+
+	// set deadlines
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := conn.rw.SetDeadline(deadline); err != nil {
+			fmt.Errorf("zmq4: could not set deadline on connection: %w", err)
+		}
+		defer conn.rw.SetDeadline(time.Time{})
+	}
 
 	err = send.write(conn.rw)
 	if err != nil {
@@ -160,7 +167,7 @@ func (conn *Conn) greet(server bool) error {
 }
 
 // SendCmd sends a ZMTP command over the wire.
-func (c *Conn) SendCmd(name string, body []byte) error {
+func (c *Conn) SendCmd(ctx context.Context, name string, body []byte) error {
 	if c.Closed() {
 		return ErrClosedConn
 	}
@@ -169,16 +176,16 @@ func (c *Conn) SendCmd(name string, body []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.send(true, buf, 0)
+	return c.send(ctx, true, buf, 0)
 }
 
 // SendMsg sends a ZMTP message over the wire.
-func (c *Conn) SendMsg(msg Msg) error {
+func (c *Conn) SendMsg(ctx context.Context, msg Msg) error {
 	if c.Closed() {
 		return ErrClosedConn
 	}
 	if msg.multipart {
-		return c.sendMulti(msg)
+		return c.sendMulti(ctx, msg)
 	}
 
 	nframes := len(msg.Frames)
@@ -187,7 +194,7 @@ func (c *Conn) SendMsg(msg Msg) error {
 		if i < nframes-1 {
 			flag ^= hasMoreBitFlag
 		}
-		err := c.send(false, frame, flag)
+		err := c.send(ctx, false, frame, flag)
 		if err != nil {
 			return fmt.Errorf("zmq4: error sending frame %d/%d: %w", i+1, nframes, err)
 		}
@@ -196,11 +203,11 @@ func (c *Conn) SendMsg(msg Msg) error {
 }
 
 // RecvMsg receives a ZMTP message from the wire.
-func (c *Conn) RecvMsg() (Msg, error) {
+func (c *Conn) RecvMsg(ctx context.Context) (Msg, error) {
 	if c.Closed() {
 		return Msg{}, ErrClosedConn
 	}
-	msg := c.read()
+	msg := c.read(ctx)
 	if msg.err != nil {
 		return msg, fmt.Errorf("zmq4: could not read recv msg: %w", msg.err)
 	}
@@ -229,7 +236,7 @@ func (c *Conn) RecvMsg() (Msg, error) {
 	switch cmd.Name {
 	case CmdPing:
 		// send back a PONG immediately.
-		msg.err = c.SendCmd(CmdPong, nil)
+		msg.err = c.SendCmd(ctx, CmdPong, nil)
 		if msg.err != nil {
 			return msg, msg.err
 		}
@@ -245,14 +252,14 @@ func (c *Conn) RecvMsg() (Msg, error) {
 	return msg, nil
 }
 
-func (c *Conn) RecvCmd() (Cmd, error) {
+func (c *Conn) RecvCmd(ctx context.Context) (Cmd, error) {
 	var cmd Cmd
 
 	if c.Closed() {
 		return cmd, ErrClosedConn
 	}
 
-	msg := c.read()
+	msg := c.read(ctx)
 	if msg.err != nil {
 		return cmd, fmt.Errorf("zmq4: could not read recv cmd: %w", msg.err)
 	}
@@ -280,7 +287,7 @@ func (c *Conn) RecvCmd() (Cmd, error) {
 	return cmd, nil
 }
 
-func (c *Conn) sendMulti(msg Msg) error {
+func (c *Conn) sendMulti(ctx context.Context, msg Msg) error {
 	var buffers net.Buffers
 
 	nframes := len(msg.Frames)
@@ -320,6 +327,29 @@ func (c *Conn) sendMulti(msg Msg) error {
 		}
 	}
 
+	// set up cancellation
+	var waitGroup sync.WaitGroup
+	defer waitGroup.Wait()
+	done := make(chan struct{})
+	defer close(done)
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		select {
+		case <-ctx.Done():
+			c.rw.Close()
+		case <-done:
+		}
+	}()
+
+	// set deadlines
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.rw.SetDeadline(deadline); err != nil {
+			fmt.Errorf("zmq4: could not set deadline on connection: %w", err)
+		}
+		defer c.rw.SetDeadline(time.Time{})
+	}
+
 	if _, err := buffers.WriteTo(c.rw); err != nil {
 		c.checkIO(err)
 		return err
@@ -328,7 +358,30 @@ func (c *Conn) sendMulti(msg Msg) error {
 	return nil
 }
 
-func (c *Conn) send(isCommand bool, body []byte, flag byte) error {
+func (c *Conn) send(ctx context.Context, isCommand bool, body []byte, flag byte) error {
+	// set up cancellation
+	var waitGroup sync.WaitGroup
+	defer waitGroup.Wait()
+	done := make(chan struct{})
+	defer close(done)
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		select {
+		case <-ctx.Done():
+			c.rw.Close()
+		case <-done:
+		}
+	}()
+
+	// set deadlines
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.rw.SetDeadline(deadline); err != nil {
+			fmt.Errorf("zmq4: could not set deadline on connection: %w", err)
+		}
+		defer c.rw.SetDeadline(time.Time{})
+	}
+
 	// Long flag
 	size := len(body)
 	isLong := size > 255
@@ -367,7 +420,30 @@ func (c *Conn) send(isCommand bool, body []byte, flag byte) error {
 }
 
 // read returns the isCommand flag, the body of the message, and optionally an error
-func (c *Conn) read() Msg {
+func (c *Conn) read(ctx context.Context) Msg {
+	// set up cancellation
+	var waitGroup sync.WaitGroup
+	defer waitGroup.Wait()
+	done := make(chan struct{})
+	defer close(done)
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		select {
+		case <-ctx.Done():
+			c.rw.Close()
+		case <-done:
+		}
+	}()
+
+	// set deadlines
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.rw.SetDeadline(deadline); err != nil {
+			fmt.Errorf("zmq4: could not set deadline on connection: %w", err)
+		}
+		defer c.rw.SetDeadline(time.Time{})
+	}
+
 	var (
 		header  [2]byte
 		longHdr [8]byte

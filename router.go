@@ -158,7 +158,7 @@ func (q *routerQReader) listen(ctx context.Context, r *Conn) {
 
 	id := []byte(r.Peer.Meta[sysSockID])
 	for {
-		msg := r.read()
+		msg := r.read(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -225,7 +225,7 @@ func (mw *routerMWriter) rmConn(w *Conn) {
 
 func (w *routerMWriter) write(ctx context.Context, msg Msg) error {
 	w.sem.lock()
-	grp, _ := errgroup.WithContext(ctx)
+	grp, ctx2 := errgroup.WithContext(ctx)
 	w.mu.Lock()
 	id := msg.Frames[0]
 	dmsg := NewMsgFrom(msg.Frames[1:]...)
@@ -236,7 +236,7 @@ func (w *routerMWriter) write(ctx context.Context, msg Msg) error {
 			continue
 		}
 		grp.Go(func() error {
-			return ww.SendMsg(dmsg)
+			return ww.SendMsg(ctx2, dmsg)
 		})
 	}
 	err := grp.Wait()

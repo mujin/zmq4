@@ -101,7 +101,7 @@ func (q *qreader) listen(ctx context.Context, r *Conn) {
 	defer r.Close()
 
 	for {
-		msg := r.read()
+		msg := r.read(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -167,12 +167,12 @@ func (mw *mwriter) rmConn(w *Conn) {
 
 func (w *mwriter) write(ctx context.Context, msg Msg) error {
 	w.sem.lock()
-	grp, _ := errgroup.WithContext(ctx)
+	grp, ctx2 := errgroup.WithContext(ctx)
 	w.mu.Lock()
 	for i := range w.ws {
 		ww := w.ws[i]
 		grp.Go(func() error {
-			return ww.SendMsg(msg)
+			return ww.SendMsg(ctx2, msg)
 		})
 	}
 	err := grp.Wait()

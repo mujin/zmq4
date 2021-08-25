@@ -159,7 +159,7 @@ func (r *repReader) listen(ctx context.Context, conn *Conn) {
 	defer conn.Close()
 
 	for {
-		msg := conn.read()
+		msg := conn.read(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -270,19 +270,19 @@ func (r *repWriter) run() {
 			if !ok {
 				return
 			}
-			r.sendPayload(payload)
+			r.sendPayload(r.ctx, payload)
 		}
 	}
 }
 
-func (r *repWriter) sendPayload(payload repSendPayload) {
+func (r *repWriter) sendPayload(ctx context.Context, payload repSendPayload) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, conn := range r.conns {
 		if conn == payload.conn {
 			reply := payload.buildReplyMsg()
 			// not much we can do at this point. Perhaps log the error?
-			_ = conn.SendMsg(reply)
+			_ = conn.SendMsg(ctx, reply)
 			return
 		}
 	}

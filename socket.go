@@ -211,7 +211,7 @@ func (sck *socket) accept() {
 				continue
 			}
 
-			zconn, err := Open(conn, sck.sec, sck.typ, sck.id, true, sck.scheduleRmConn)
+			zconn, err := Open(ctx, conn, sck.sec, sck.typ, sck.id, true, sck.scheduleRmConn)
 			if err != nil {
 				// FIXME(sbinet): maybe bubble up this error to application code?
 				sck.log.Printf("could not open a ZMTP connection with %q: %+v", sck.ep, err)
@@ -258,7 +258,7 @@ connect:
 		return fmt.Errorf("zmq4: got a nil dial-conn to %q", endpoint)
 	}
 
-	zconn, err := Open(conn, sck.sec, sck.typ, sck.id, false, sck.scheduleRmConn)
+	zconn, err := Open(sck.ctx, conn, sck.sec, sck.typ, sck.id, false, sck.scheduleRmConn)
 	if err != nil {
 		return fmt.Errorf("zmq4: could not open a ZMTP connection: %w", err)
 	}

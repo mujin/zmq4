@@ -112,7 +112,7 @@ func (r *reqWriter) write(ctx context.Context, msg Msg) error {
 	for i := 0; i < len(r.conns); i++ {
 		cur := i + r.nextConn%len(r.conns)
 		conn := r.conns[cur]
-		err = conn.SendMsg(msg)
+		err = conn.SendMsg(ctx, msg)
 		if err == nil {
 			r.nextConn = cur + 1%len(r.conns)
 			r.state.Set(conn)
@@ -183,7 +183,7 @@ func (r *reqReader) read(ctx context.Context, msg *Msg) error {
 	if curConn == nil {
 		return fmt.Errorf("zmq4: no connections available")
 	}
-	*msg = curConn.read()
+	*msg = curConn.read(ctx)
 	if msg.err != nil {
 		return msg.err
 	}

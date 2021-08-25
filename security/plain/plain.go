@@ -7,6 +7,7 @@
 package plain
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -35,10 +36,10 @@ func (security) Type() zmq4.SecurityType {
 //  https://rfc.zeromq.org/spec:23/ZMTP/
 //  https://rfc.zeromq.org/spec:24/ZMTP-PLAIN/
 //  https://rfc.zeromq.org/spec:25/ZMTP-CURVE/
-func (sec *security) Handshake(conn *zmq4.Conn, server bool) error {
+func (sec *security) Handshake(ctx context.Context, conn *zmq4.Conn, server bool) error {
 	switch {
 	case server:
-		cmd, err := conn.RecvCmd()
+		cmd, err := conn.RecvCmd(ctx)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not receive HELLO from client: %w", err)
 		}
@@ -50,16 +51,16 @@ func (sec *security) Handshake(conn *zmq4.Conn, server bool) error {
 		// FIXME(sbinet): perform a real authentication
 		err = validateHello(cmd.Body)
 		if err != nil {
-			_ = conn.SendCmd(zmq4.CmdError, []byte("invalid")) // FIXME(sbinet) correct ERROR reason
+			_ = conn.SendCmd(ctx, zmq4.CmdError, []byte("invalid")) // FIXME(sbinet) correct ERROR reason
 			return fmt.Errorf("security/plain: could not authenticate client: %w", err)
 		}
 
-		err = conn.SendCmd(zmq4.CmdWelcome, nil)
+		err = conn.SendCmd(ctx, zmq4.CmdWelcome, nil)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not send WELCOME to client: %w", err)
 		}
 
-		cmd, err = conn.RecvCmd()
+		cmd, err = conn.RecvCmd(ctx)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not receive INITIATE from client: %w", err)
 		}
@@ -71,11 +72,11 @@ func (sec *security) Handshake(conn *zmq4.Conn, server bool) error {
 
 		raw, err := conn.Meta.MarshalZMTP()
 		if err != nil {
-			_ = conn.SendCmd(zmq4.CmdError, []byte("invalid")) // FIXME(sbinet) correct ERROR reason
+			_ = conn.SendCmd(ctx, zmq4.CmdError, []byte("invalid")) // FIXME(sbinet) correct ERROR reason
 			return fmt.Errorf("security/plain: could not serialize metadata: %w", err)
 		}
 
-		err = conn.SendCmd(zmq4.CmdReady, raw)
+		err = conn.SendCmd(ctx, zmq4.CmdReady, raw)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not send READY to client: %w", err)
 		}
@@ -87,37 +88,37 @@ func (sec *security) Handshake(conn *zmq4.Conn, server bool) error {
 		hello = append(hello, byte(len(sec.pass)))
 		hello = append(hello, sec.pass...)
 
-		err := conn.SendCmd(zmq4.CmdHello, hello)
+		err := conn.SendCmd(ctx, zmq4.CmdHello, hello)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not send HELLO to server: %w", err)
 		}
 
-		cmd, err := conn.RecvCmd()
+		cmd, err := conn.RecvCmd(ctx)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not receive WELCOME from server: %w", err)
 		}
 		if cmd.Name != zmq4.CmdWelcome {
-			_ = conn.SendCmd(zmq4.CmdError, []byte("invalid command")) // FIXME(sbinet) correct ERROR reason
+			_ = conn.SendCmd(ctx, zmq4.CmdError, []byte("invalid command")) // FIXME(sbinet) correct ERROR reason
 			return fmt.Errorf("security/plain: expected a WELCOME command from server: %w", err)
 		}
 
 		raw, err := conn.Meta.MarshalZMTP()
 		if err != nil {
-			_ = conn.SendCmd(zmq4.CmdError, []byte("internal error")) // FIXME(sbinet) correct ERROR reason
+			_ = conn.SendCmd(ctx, zmq4.CmdError, []byte("internal error")) // FIXME(sbinet) correct ERROR reason
 			return fmt.Errorf("security/plain: could not serialize metadata: %w", err)
 		}
 
-		err = conn.SendCmd(zmq4.CmdInitiate, raw)
+		err = conn.SendCmd(ctx, zmq4.CmdInitiate, raw)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not send INITIATE to server: %w", err)
 		}
 
-		cmd, err = conn.RecvCmd()
+		cmd, err = conn.RecvCmd(ctx)
 		if err != nil {
 			return fmt.Errorf("security/plain: could not receive READY from server: %w", err)
 		}
 		if cmd.Name != zmq4.CmdReady {
-			_ = conn.SendCmd(zmq4.CmdError, []byte("invalid command")) // FIXME(sbinet) correct ERROR reason
+			_ = conn.SendCmd(ctx, zmq4.CmdError, []byte("invalid command")) // FIXME(sbinet) correct ERROR reason
 			return fmt.Errorf("security/plain: expected a READY command from server: %w", err)
 		}
 
