@@ -116,7 +116,7 @@ func (conn *Conn) greet(ctx context.Context, server bool) error {
 	}
 	copy(send.Mechanism[:], kind)
 
-	cleanUp := SetDeadlineAndWatchForCancel(ctx, conn.rw)
+	cleanUp := setDeadlineAndCloseOnCancel(ctx, conn.rw)
 	defer cleanUp()
 
 	err = send.write(conn.rw)
@@ -306,7 +306,7 @@ func (c *Conn) sendMulti(ctx context.Context, msg Msg) error {
 		}
 	}
 
-	cleanUp := SetDeadlineAndWatchForCancel(ctx, c.rw)
+	cleanUp := setDeadlineAndCloseOnCancel(ctx, c.rw)
 	defer cleanUp()
 
 	if _, err := buffers.WriteTo(c.rw); err != nil {
@@ -318,7 +318,7 @@ func (c *Conn) sendMulti(ctx context.Context, msg Msg) error {
 }
 
 func (c *Conn) send(ctx context.Context, isCommand bool, body []byte, flag byte) error {
-	cleanUp := SetDeadlineAndWatchForCancel(ctx, c.rw)
+	cleanUp := setDeadlineAndCloseOnCancel(ctx, c.rw)
 	defer cleanUp()
 
 	// Long flag
@@ -369,7 +369,7 @@ func (c *Conn) read(ctx context.Context) Msg {
 		isCmd   = false
 	)
 
-	cleanUp := SetDeadlineAndWatchForCancel(ctx, c.rw)
+	cleanUp := setDeadlineAndCloseOnCancel(ctx, c.rw)
 	defer cleanUp()
 
 	for hasMore {

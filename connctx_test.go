@@ -40,7 +40,7 @@ func (self *testConn) SetDeadline(deadline time.Time) error {
 func TestCancel(t *testing.T) {
 	conn := newTestConn(true)
 	ctx, cancel := context.WithCancel(context.Background())
-	cleanUp := SetDeadlineAndWatchForCancel(ctx, conn)
+	cleanUp := setDeadlineAndCloseOnCancel(ctx, conn)
 
 	if !conn.deadline.IsZero() {
 		t.Fatalf("deadline should not have been set: %v", conn.deadline)
@@ -60,7 +60,7 @@ func TestCancel(t *testing.T) {
 func TestDeadline(t *testing.T) {
 	conn := newTestConn(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	cleanUp := SetDeadlineAndWatchForCancel(ctx, conn)
+	cleanUp := setDeadlineAndCloseOnCancel(ctx, conn)
 
 	if conn.deadline.IsZero() {
 		t.Fatalf("deadline should have been set")
@@ -79,7 +79,7 @@ func TestDeadline(t *testing.T) {
 func TestFakeDeadline(t *testing.T) {
 	conn := newTestConn(false)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	cleanUp := SetDeadlineAndWatchForCancel(ctx, conn)
+	cleanUp := setDeadlineAndCloseOnCancel(ctx, conn)
 
 	if !conn.deadline.IsZero() {
 		t.Fatalf("deadline should not have been allowed: %v", conn.deadline)

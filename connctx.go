@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-type SetDeadlineCloser interface {
+type setDeadlineCloser interface {
 	SetDeadline(time.Time) error
 	Close() error
 }
 
-func SetDeadlineAndWatchForCancel(ctx context.Context, conn SetDeadlineCloser) func() {
+func setDeadlineAndCloseOnCancel(ctx context.Context, conn setDeadlineCloser) func() {
 	// set deadlines
 	var deadlineSet bool
 	if deadline, ok := ctx.Deadline(); ok {
