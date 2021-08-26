@@ -55,9 +55,7 @@ func setDeadlineAndCloseOnCancel(ctx context.Context, conn setDeadlineCloser) fu
 
 		// unset the deadline if we set one
 		if deadlineSet {
-			if err := conn.SetDeadline(time.Time{}); err != nil {
-				// failed to restore deadline, maybe okay to ignore
-			}
+			_ = conn.SetDeadline(time.Time{})
 		}
 	}
 }
