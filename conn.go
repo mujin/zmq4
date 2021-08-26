@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 var ErrClosedConn = errors.New("zmq4: read/write on closed connection")
@@ -117,11 +116,7 @@ func (conn *Conn) greet(ctx context.Context, server bool) error {
 	}
 	copy(send.Mechanism[:], kind)
 
-	cleanUp, err := setDeadlineAndWatchForCancellation(ctx, conn.rw)
-	if err != nil {
-		conn.checkIO(err)
-		return fmt.Errorf("zmq4: could not set deadline on connection: %w", err)
-	}
+	cleanUp := SetDeadlineAndWatchForCancel(ctx, conn.rw)
 	defer cleanUp()
 
 	err = send.write(conn.rw)
@@ -311,11 +306,7 @@ func (c *Conn) sendMulti(ctx context.Context, msg Msg) error {
 		}
 	}
 
-	cleanUp, err := setDeadlineAndWatchForCancellation(ctx, c.rw)
-	if err != nil {
-		c.checkIO(err)
-		return fmt.Errorf("zmq4: could not set deadline on connection: %w", err)
-	}
+	cleanUp := SetDeadlineAndWatchForCancel(ctx, c.rw)
 	defer cleanUp()
 
 	if _, err := buffers.WriteTo(c.rw); err != nil {
@@ -327,11 +318,7 @@ func (c *Conn) sendMulti(ctx context.Context, msg Msg) error {
 }
 
 func (c *Conn) send(ctx context.Context, isCommand bool, body []byte, flag byte) error {
-	cleanUp, err := setDeadlineAndWatchForCancellation(ctx, c.rw)
-	if err != nil {
-		c.checkIO(err)
-		return fmt.Errorf("zmq4: could not set deadline on connection: %w", err)
-	}
+	cleanUp := SetDeadlineAndWatchForCancel(ctx, c.rw)
 	defer cleanUp()
 
 	// Long flag
@@ -382,11 +369,7 @@ func (c *Conn) read(ctx context.Context) Msg {
 		isCmd   = false
 	)
 
-	cleanUp, err := setDeadlineAndWatchForCancellation(ctx, c.rw)
-	if err != nil {
-		c.checkIO(err)
-		return msg
-	}
+	cleanUp := SetDeadlineAndWatchForCancel(ctx, c.rw)
 	defer cleanUp()
 
 	for hasMore {
@@ -510,39 +493,4 @@ func (conn *Conn) notifyOnCloseError() {
 		return
 	}
 	conn.onCloseErrorCB(conn)
-}
-
-func setDeadlineAndWatchForCancellation(ctx context.Context, conn net.Conn) (func(), error) {
-	// set deadlines
-	var deadlineSet bool
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := conn.SetDeadline(deadline); err != nil {
-			return nil, err
-		}
-		deadlineSet = true
-	}
-
-	// also watch for cancellation
-	done := make(chan struct{})
-	var waitGroup sync.WaitGroup
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		select {
-		case <-ctx.Done():
-			conn.Close()
-		case <-done:
-		}
-	}()
-
-	// return a clean up function
-	return func() {
-		close(done)
-		waitGroup.Wait()
-
-		// unset the deadline if we set one
-		if deadlineSet {
-			conn.SetDeadline(time.Time{})
-		}
-	}, nil
 }
