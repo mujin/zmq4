@@ -45,6 +45,13 @@ func WithDialerTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithTimeout sets the timeout value for socket operations
+func WithTimeout(timeout time.Duration) Option {
+	return func(s *socket) {
+		s.timeout = timeout
+	}
+}
+
 // WithLogger sets a dedicated log.Logger for the socket.
 func WithLogger(msg *log.Logger) Option {
 	return func(s *socket) {
@@ -55,6 +62,22 @@ func WithLogger(msg *log.Logger) Option {
 func WithListenFunction(listenFunction func(string, string) (net.Listener, error)) Option {
 	return func(s *socket) {
 		s.listenFunction = listenFunction
+	}
+}
+
+// WithDialerMaxRetries configures the maximum number of retries
+// when dialing an endpoint (-1 means infinite retries).
+func WithDialerMaxRetries(maxRetries int) Option {
+	return func(s *socket) {
+		s.maxRetries = maxRetries
+	}
+}
+
+// WithAutomaticReconnect allows to configure a socket to automatically
+// reconnect on connection loss.
+func WithAutomaticReconnect(automaticReconnect bool) Option {
+	return func(s *socket) {
+		s.autoReconnect = automaticReconnect
 	}
 }
 
