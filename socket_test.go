@@ -6,13 +6,16 @@ package zmq4_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-zeromq/zmq4"
+	"github.com/go-zeromq/zmq4/transport"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -219,4 +222,170 @@ func TestConnReaperDeadlock(t *testing.T) {
 	for i := 5; i < 10; i++ {
 		clients[i].Close()
 	}
+}
+
+func TestSocketSendSubscriptionOnConnect(t *testing.T) {
+	endpoint := "inproc://test-resub"
+	message := "test"
+
+	sub := zmq4.NewSub(context.Background())
+	defer sub.Close()
+	pub := zmq4.NewPub(context.Background())
+	defer pub.Close()
+	sub.SetOption(zmq4.OptionSubscribe, message)
+	if err := sub.Listen(endpoint); err != nil {
+		t.Fatalf("Sub Dial failed: %v", err)
+	}
+	if err := pub.Dial(endpoint); err != nil {
+		t.Fatalf("Pub Dial failed: %v", err)
+	}
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			pub.Send(zmq4.NewMsgFromString([]string{message}))
+			if ctx.Err() != nil {
+				return
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+	msg, err := sub.Recv()
+	if err != nil {
+		t.Fatalf("Recv failed: %v", err)
+	}
+	if string(msg.Frames[0]) != message {
+		t.Fatalf("invalid message received: got '%s', wanted '%s'", msg.Frames[0], message)
+	}
+}
+
+type transportMock struct {
+	dialCalledCount int
+	errOnDial       bool
+	conn            net.Conn
+}
+
+func (t *transportMock) Dial(ctx context.Context, dialer transport.Dialer, addr string) (net.Conn, error) {
+	t.dialCalledCount++
+	if t.errOnDial {
+		return nil, errors.New("test error")
+	}
+	return t.conn, nil
+}
+
+func (t *transportMock) Listen(ctx context.Context, addr string) (net.Listener, error) {
+	return nil, nil
+}
+
+func (t *transportMock) Addr(ep string) (addr string, err error) {
+	return "", nil
+}
+
+func TestConnMaxRetries(t *testing.T) {
+	retryCount := 123
+	socket := zmq4.NewSub(context.Background(), zmq4.WithDialerRetry(time.Microsecond), zmq4.WithDialerMaxRetries(retryCount))
+	transport := &transportMock{errOnDial: true}
+	transportName := "test-maxretries"
+	zmq4.RegisterTransport(transportName, transport)
+	err := socket.Dial(transportName + "://test")
+
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if transport.dialCalledCount != retryCount+1 {
+		t.Fatalf("Dial called %d times, expected %d", transport.dialCalledCount, retryCount+1)
+	}
+}
+
+func TestConnMaxRetriesInfinite(t *testing.T) {
+	timeout := time.Millisecond
+	retryTime := time.Nanosecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	socket := zmq4.NewSub(ctx, zmq4.WithDialerRetry(retryTime), zmq4.WithDialerMaxRetries(-1))
+	transport := &transportMock{errOnDial: true}
+	transportName := "test-infiniteretries"
+	zmq4.RegisterTransport(transportName, transport)
+	err := socket.Dial(transportName + "://test")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	atLeastExpectedRetries := 100
+	if transport.dialCalledCount < atLeastExpectedRetries {
+		t.Fatalf("Dial called %d times, expected  at least %d", transport.dialCalledCount, atLeastExpectedRetries)
+	}
+}
+
+func TestSocketAutomaticReconnect(t *testing.T) {
+	ep, err := EndPoint("tcp")
+	if err != nil {
+		t.Fatalf("could not find endpoint: %+v", err)
+	}
+	message := "test"
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sendMessages := func(socket zmq4.Socket) {
+		wg.Add(1)
+		go func(t *testing.T) {
+			defer wg.Done()
+			for {
+				socket.Send(zmq4.NewMsgFromString([]string{message}))
+				if ctx.Err() != nil {
+					return
+				}
+				time.Sleep(1 * time.Millisecond)
+			}
+		}(t)
+	}
+
+	sub := zmq4.NewSub(context.Background(), zmq4.WithAutomaticReconnect(true))
+	defer sub.Close()
+	sub.SetOption(zmq4.OptionSubscribe, message)
+	pub := zmq4.NewPub(context.Background())
+	if err := pub.Listen(ep); err != nil {
+		t.Fatalf("Pub Dial failed: %v", err)
+	}
+	if err := sub.Dial(ep); err != nil {
+		t.Fatalf("Sub Dial failed: %v", err)
+	}
+
+	sendMessages(pub)
+
+	checkConnectionWorking := func(socket zmq4.Socket) {
+		for {
+			msg, err := socket.Recv()
+			if errors.Is(err, io.EOF) {
+				continue
+			}
+			if err != nil {
+				t.Fatalf("Recv failed: %v", err)
+			}
+			if string(msg.Frames[0]) != message {
+				t.Fatalf("invalid message received: got '%s', wanted '%s'", msg.Frames[0], message)
+			}
+			return
+		}
+	}
+
+	checkConnectionWorking(sub)
+	pub.Close()
+
+	pub2 := zmq4.NewPub(context.Background())
+	defer pub2.Close()
+	if err := pub2.Listen(ep); err != nil {
+		t.Fatalf("Sub Listen failed: %v", err)
+	}
+	sendMessages(pub2)
+	checkConnectionWorking(sub)
 }

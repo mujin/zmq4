@@ -63,11 +63,11 @@ func (q *qreader) Close() error {
 }
 
 func (q *qreader) addConn(r *Conn) {
-	go q.listen(q.ctx, r)
 	q.mu.Lock()
 	q.sem.enable()
 	q.rs = append(q.rs, r)
 	q.mu.Unlock()
+	go q.listen(q.ctx, r)
 }
 
 func (q *qreader) rmConn(r *Conn) {
@@ -87,7 +87,7 @@ func (q *qreader) rmConn(r *Conn) {
 }
 
 func (q *qreader) read(ctx context.Context, msg *Msg) error {
-	q.sem.lock()
+	q.sem.lock(ctx)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -166,7 +166,7 @@ func (mw *mwriter) rmConn(w *Conn) {
 }
 
 func (w *mwriter) write(ctx context.Context, msg Msg) error {
-	w.sem.lock()
+	w.sem.lock(ctx)
 	grp, ctx2 := errgroup.WithContext(ctx)
 	w.mu.Lock()
 	for i := range w.ws {
@@ -199,8 +199,11 @@ func (sem *semaphore) enable() {
 	}
 }
 
-func (sem *semaphore) lock() {
-	<-sem.ready
+func (sem *semaphore) lock(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+	case <-sem.ready:
+	}
 }
 
 var (
