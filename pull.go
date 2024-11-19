@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 )
 
 // NewPull returns a new PULL ZeroMQ socket.
@@ -32,6 +33,14 @@ func (pull *pullSocket) Close() error {
 // Send blocks until the message can be queued or the send deadline expires.
 func (*pullSocket) Send(msg Msg) error {
 	return fmt.Errorf("zmq4: PULL sockets can't send messages")
+}
+
+func (pull *pullSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	return fmt.Errorf("zmq4: PULL sockets can't send messages")
+}
+
+func (pull *pullSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return pull.sck.RecvWithTimeout(duration)
 }
 
 // SendMulti puts the message on the outbound send queue.

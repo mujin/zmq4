@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 // Topics is an interface that wraps the basic Topics method.
@@ -44,6 +45,12 @@ func (pub *pubSocket) Send(msg Msg) error {
 	return pub.sck.w.write(ctx, msg)
 }
 
+func (pub *pubSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	ctx, cancel := context.WithTimeout(pub.sck.ctx, duration)
+	defer cancel()
+	return pub.sck.w.write(ctx, msg)
+}
+
 // SendMulti puts the message on the outbound send queue.
 // SendMulti blocks until the message can be queued or the send deadline expires.
 // The message will be sent as a multipart message.
@@ -56,6 +63,11 @@ func (pub *pubSocket) SendMulti(msg Msg) error {
 
 // Recv receives a complete message.
 func (*pubSocket) Recv() (Msg, error) {
+	msg := Msg{err: fmt.Errorf("zmq4: PUB sockets can't recv messages")}
+	return msg, msg.err
+}
+
+func (*pubSocket) RecvWithTimeout(time.Duration) (Msg, error) {
 	msg := Msg{err: fmt.Errorf("zmq4: PUB sockets can't recv messages")}
 	return msg, msg.err
 }

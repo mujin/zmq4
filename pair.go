@@ -33,8 +33,8 @@ func (pair *pairSocket) Send(msg Msg) error {
 	return pair.sck.Send(msg)
 }
 
-func (pair *pairSocket) SendWithDeadline(msg Msg, duration time.Duration) error {
-	return pair.sck.SendWithDeadline(msg, duration)
+func (pair *pairSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	return pair.sck.SendWithTimeout(msg, duration)
 }
 
 // SendMulti puts the message on the outbound send queue.
@@ -49,8 +49,8 @@ func (pair *pairSocket) Recv() (Msg, error) {
 	return pair.sck.Recv()
 }
 
-func (pair *pairSocket) RecvWithDeadline(duration time.Duration) (Msg, error) {
-	return pair.sck.RecvWithDeadline(duration)
+func (pair *pairSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return pair.sck.RecvWithTimeout(duration)
 }
 
 // Listen connects a local endpoint to the Socket.

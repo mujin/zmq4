@@ -9,6 +9,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -51,6 +52,16 @@ func (router *routerSocket) SendMulti(msg Msg) error {
 // Recv receives a complete message.
 func (router *routerSocket) Recv() (Msg, error) {
 	return router.sck.Recv()
+}
+
+func (router *routerSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	ctx, cancel := context.WithTimeout(router.sck.ctx, duration)
+	defer cancel()
+	return router.sck.w.write(ctx, msg)
+}
+
+func (router *routerSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return router.sck.RecvWithTimeout(duration)
 }
 
 // Listen connects a local endpoint to the Socket.

@@ -148,7 +148,7 @@ func (sck *socket) Send(msg Msg) error {
 	return sck.w.write(ctx, msg)
 }
 
-func (sck *socket) SendWithDeadline(msg Msg, duration time.Duration) error {
+func (sck *socket) SendWithTimeout(msg Msg, duration time.Duration) error {
 	ctx, cancel := context.WithTimeout(sck.ctx, duration)
 	defer cancel()
 	return sck.w.write(ctx, msg)
@@ -173,7 +173,7 @@ func (sck *socket) Recv() (Msg, error) {
 	return msg, err
 }
 
-func (sck *socket) RecvWithDeadline(duration time.Duration) (Msg, error) {
+func (sck *socket) RecvWithTimeout(duration time.Duration) (Msg, error) {
 	ctx, cancel := context.WithTimeout(sck.ctx, duration)
 	defer cancel()
 	var msg Msg

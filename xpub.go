@@ -7,6 +7,7 @@ package zmq4
 import (
 	"context"
 	"net"
+	"time"
 )
 
 // NewXPub returns a new XPUB ZeroMQ socket.
@@ -44,6 +45,14 @@ func (xpub *xpubSocket) SendMulti(msg Msg) error {
 // Recv receives a complete message.
 func (xpub *xpubSocket) Recv() (Msg, error) {
 	return xpub.sck.Recv()
+}
+
+func (xpub *xpubSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	return xpub.sck.SendWithTimeout(msg, duration)
+}
+
+func (xpub *xpubSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return xpub.sck.RecvWithTimeout(duration)
 }
 
 // Listen connects a local endpoint to the Socket.

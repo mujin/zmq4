@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 // NewRep returns a new REP ZeroMQ socket.
@@ -39,6 +40,12 @@ func (rep *repSocket) Send(msg Msg) error {
 	return rep.sck.w.write(ctx, msg)
 }
 
+func (rep *repSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	ctx, cancel := context.WithTimeout(rep.sck.ctx, duration)
+	defer cancel()
+	return rep.sck.w.write(ctx, msg)
+}
+
 // SendMulti puts the message on the outbound send queue.
 // SendMulti blocks until the message can be queued or the send deadline expires.
 // The message will be sent as a multipart message.
@@ -52,6 +59,14 @@ func (rep *repSocket) SendMulti(msg Msg) error {
 // Recv receives a complete message.
 func (rep *repSocket) Recv() (Msg, error) {
 	ctx, cancel := context.WithCancel(rep.sck.ctx)
+	defer cancel()
+	var msg Msg
+	err := rep.sck.r.read(ctx, &msg)
+	return msg, err
+}
+
+func (rep *repSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	ctx, cancel := context.WithTimeout(rep.sck.ctx, duration)
 	defer cancel()
 	var msg Msg
 	err := rep.sck.r.read(ctx, &msg)

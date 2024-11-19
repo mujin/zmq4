@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 )
 
 // NewPush returns a new PUSH ZeroMQ socket.
@@ -32,6 +33,14 @@ func (push *pushSocket) Close() error {
 // Send blocks until the message can be queued or the send deadline expires.
 func (push *pushSocket) Send(msg Msg) error {
 	return push.sck.Send(msg)
+}
+
+func (push *pushSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	return push.sck.SendWithTimeout(msg, duration)
+}
+
+func (push *pushSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return Msg{}, fmt.Errorf("zmq4: PUSH sockets can't recv messages")
 }
 
 // SendMulti puts the message on the outbound send queue.

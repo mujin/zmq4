@@ -9,6 +9,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
 )
 
 // NewSub returns a new SUB ZeroMQ socket.
@@ -49,6 +50,14 @@ func (sub *subSocket) SendMulti(msg Msg) error {
 // Recv receives a complete message.
 func (sub *subSocket) Recv() (Msg, error) {
 	return sub.sck.Recv()
+}
+
+func (sub *subSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	return sub.sck.SendWithTimeout(msg, duration)
+}
+
+func (sub *subSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return sub.sck.RecvWithTimeout(duration)
 }
 
 // Listen connects a local endpoint to the Socket.

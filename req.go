@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 // NewReq returns a new REQ ZeroMQ socket.
@@ -40,6 +41,12 @@ func (req *reqSocket) Send(msg Msg) error {
 	return req.sck.w.write(ctx, msg)
 }
 
+func (req *reqSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	ctx, cancel := context.WithTimeout(req.sck.ctx, duration)
+	defer cancel()
+	return req.sck.w.write(ctx, msg)
+}
+
 // SendMulti puts the message on the outbound send queue.
 // SendMulti blocks until the message can be queued or the send deadline expires.
 // The message will be sent as a multipart message.
@@ -53,6 +60,14 @@ func (req *reqSocket) SendMulti(msg Msg) error {
 // Recv receives a complete message.
 func (req *reqSocket) Recv() (Msg, error) {
 	ctx, cancel := context.WithCancel(req.sck.ctx)
+	defer cancel()
+	var msg Msg
+	err := req.sck.r.read(ctx, &msg)
+	return msg, err
+}
+
+func (req *reqSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	ctx, cancel := context.WithTimeout(req.sck.ctx, duration)
 	defer cancel()
 	var msg Msg
 	err := req.sck.r.read(ctx, &msg)

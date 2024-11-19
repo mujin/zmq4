@@ -7,7 +7,10 @@
 // For more informations, see http://zeromq.org.
 package zmq4
 
-import "net"
+import (
+	"net"
+	"time"
+)
 
 // Socket represents a ZeroMQ socket.
 type Socket interface {
@@ -18,6 +21,8 @@ type Socket interface {
 	// Send blocks until the message can be queued or the send deadline expires.
 	Send(msg Msg) error
 
+	SendWithTimeout(msg Msg, duration time.Duration) error
+
 	// SendMulti puts the message on the outbound send queue.
 	// SendMulti blocks until the message can be queued or the send deadline expires.
 	// The message will be sent as a multipart message.
@@ -25,6 +30,8 @@ type Socket interface {
 
 	// Recv receives a complete message.
 	Recv() (Msg, error)
+
+	RecvWithTimeout(duration time.Duration) (Msg, error)
 
 	// Listen connects a local endpoint to the Socket.
 	Listen(ep string) error

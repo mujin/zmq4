@@ -7,6 +7,7 @@ package zmq4
 import (
 	"context"
 	"net"
+	"time"
 )
 
 // NewXSub returns a new XSUB ZeroMQ socket.
@@ -42,6 +43,14 @@ func (xsub *xsubSocket) SendMulti(msg Msg) error {
 // Recv receives a complete message.
 func (xsub *xsubSocket) Recv() (Msg, error) {
 	return xsub.sck.Recv()
+}
+
+func (xsub *xsubSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	return xsub.sck.SendWithTimeout(msg, duration)
+}
+
+func (xsub *xsubSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return xsub.sck.RecvWithTimeout(duration)
 }
 
 // Listen connects a local endpoint to the Socket.

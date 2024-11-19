@@ -7,6 +7,7 @@ package zmq4
 import (
 	"context"
 	"net"
+	"time"
 )
 
 // NewDealer returns a new DEALER ZeroMQ socket.
@@ -32,6 +33,10 @@ func (dealer *dealerSocket) Send(msg Msg) error {
 	return dealer.sck.Send(msg)
 }
 
+func (dealer *dealerSocket) SendWithTimeout(msg Msg, duration time.Duration) error {
+	return dealer.sck.SendWithTimeout(msg, duration)
+}
+
 // SendMulti puts the message on the outbound send queue.
 // SendMulti blocks until the message can be queued or the send deadline expires.
 // The message will be sent as a multipart message.
@@ -42,6 +47,10 @@ func (dealer *dealerSocket) SendMulti(msg Msg) error {
 // Recv receives a complete message.
 func (dealer *dealerSocket) Recv() (Msg, error) {
 	return dealer.sck.Recv()
+}
+
+func (dealer *dealerSocket) RecvWithTimeout(duration time.Duration) (Msg, error) {
+	return dealer.sck.RecvWithTimeout(duration)
 }
 
 // Listen connects a local endpoint to the Socket.
